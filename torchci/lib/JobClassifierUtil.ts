@@ -406,6 +406,9 @@ export function getGroupingData(
   // Track which jobs have failures
   const jobsWithFailures = new Set<string>();
 
+  // Track which jobs are always skipped (every recorded run was skipped)
+  const jobsAlwaysSkipped = new Set<string>();
+
   // Track which jobs are viable/strict blocking
   const jobsViableStrictBlocking = new Set<string>();
 
@@ -419,6 +422,27 @@ export function getGroupingData(
 
     if (hasFailure) {
       jobsWithFailures.add(name);
+    }
+
+    // A job is "always skipped" iff at least one real run exists and every
+    // real run has conclusion === 'skipped'. `nameToJobs` always has an entry
+    // per column (empty `{}` stubs for commits where the job didn't run), so
+    // we identify real runs by the presence of `id`.
+    let sawAnyJob = false;
+    let sawNonSkipped = false;
+    for (const row of shaGrid) {
+      const job = row.nameToJobs.get(name);
+      if (!job || !job.id) {
+        continue;
+      }
+      sawAnyJob = true;
+      if (job.conclusion !== JobStatus.Skipped) {
+        sawNonSkipped = true;
+        break;
+      }
+    }
+    if (sawAnyJob && !sawNonSkipped) {
+      jobsAlwaysSkipped.add(name);
     }
 
     // Check if this job is viable/strict blocking
@@ -455,11 +479,24 @@ export function getGroupingData(
     }
   }
 
+  // A group is "always skipped" iff every job in it is always skipped
+  const groupsAlwaysSkipped = new Set<string>();
+  for (const [groupName, jobs] of groupNameMapping.entries()) {
+    if (
+      jobs.length > 0 &&
+      jobs.every((jobName) => jobsAlwaysSkipped.has(jobName))
+    ) {
+      groupsAlwaysSkipped.add(groupName);
+    }
+  }
+
   return {
     shaGrid,
     groupNameMapping,
     jobsWithFailures,
     groupsWithFailures,
+    jobsAlwaysSkipped,
+    groupsAlwaysSkipped,
     jobsViableStrictBlocking,
     groupsViableStrictBlocking,
   };
